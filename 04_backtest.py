@@ -40,6 +40,8 @@ def strat_sma(df, fast=20, slow=50):
     return (f > s).astype(float)   # long when fast above slow
 
 STRATS = {"rsi": strat_rsi, "sma": strat_sma}
+import catalog_strats
+STRATS.update(catalog_strats.STRATS)
 
 # ---- backtest engine --------------------------------------------------------
 def backtest(df, pos):
