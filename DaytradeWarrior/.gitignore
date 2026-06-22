@@ -1,0 +1,5 @@
+chroma_db/
+transcripts_combined.jsonl
+venv/
+__pycache__/
+*.pyc
