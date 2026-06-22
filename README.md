@@ -38,16 +38,18 @@ The project runs in stages. Each stage is a standalone script.
 
 The catalog was narrowed to **12 distinct, fully-specified, mechanical strategies**
 (deduplicated — e.g. the 15+ moving-average-crossover variants collapse to one).
-Each has a concrete entry rule, exit rule, and indicator set.
+Each has a concrete entry rule, exit rule, and indicator set. After backtesting,
+**2 were dropped** (S05 gap and S09 overnight — both strongly negative
+out-of-sample), leaving **10 active strategies**.
 
 - `04_backtest.py` — the engine. A strategy is a function `df -> position series`
   (1 = long, 0 = flat, -1 = short). The engine handles next-bar execution,
   transaction costs, the in/out-of-sample split, and metrics vs buy-and-hold.
-- `catalog_strats.py` — **8 of the 12** strategies as drop-in position functions.
+- `catalog_strats.py` — **8 strategies** as drop-in position functions.
   Wired in via `STRATS.update(catalog_strats.STRATS)`.
-- `extras_backtest.py` — **the other 4** (gap, overnight, allocation, pairs).
+- `extras_backtest.py` — **the other 2** (allocation, pairs).
   These don't fit a single-ticker close-to-close position series (they need
-  intraday open/close fills or two tickers), so they run standalone.
+  two tickers), so they run standalone.
 
 ### Run it
 
@@ -64,7 +66,7 @@ py 04_backtest.py SPY s07
 py 04_backtest.py SPY s08
 py 04_backtest.py SPY s10
 
-# the other 4 (all at once)
+# the other 2 (all at once)
 py extras_backtest.py
 ```
 
@@ -76,11 +78,11 @@ py extras_backtest.py
 | S02 | SMA 50/200 crossover (canonical MA-cross) | trend | `04_backtest.py` |
 | S03 | MACD(12,26,9) signal crossover | momentum | `04_backtest.py` |
 | S04 | Bollinger(20,2) + RSI(14) mean reversion | mean reversion | `04_backtest.py` |
-| S05 | Gap-up: buy open, sell close | gap/intraday | `extras_backtest.py` |
+| S05 | Gap-up: buy open, sell close | gap/intraday | **dropped** (failed OOS) |
 | S06 | LSMA(25) cross | regression MR | `04_backtest.py` |
 | S07 | Stoch-K(8) oversold + SMA200 buy-limit | mean reversion | `04_backtest.py` |
 | S08 | LinReg(14) mean reversion + SMA200 (long/short) | mean reversion | `04_backtest.py` |
-| S09 | Overnight drift: buy close, sell next open | calendar | `extras_backtest.py` |
+| S09 | Overnight drift: buy close, sell next open | calendar | **dropped** (failed OOS) |
 | S10 | Donchian range breakout | breakout | `04_backtest.py` |
 | S11 | QQQ/BND SMA30 regime allocation | allocation | `extras_backtest.py` |
 | S12 | KO/PEP z-score pairs (market-neutral) | stat-arb | `extras_backtest.py` |
@@ -130,7 +132,7 @@ sourced from trading tutorials, and exactly why we backtest instead of trusting 
 03_extract_strategies.py   stage 3: extract candidate strategies
 04_backtest.py             stage 5: backtest engine
 catalog_strats.py          8 of 12 strategies (drop-in position functions)
-extras_backtest.py         the other 4 strategies (standalone)
+extras_backtest.py         the other 2 strategies, standalone (S11, S12)
 filter_strategies.py       stage 4: filter candidates -> shortlist
 strategies.csv             extracted strategy catalog (~400 rows)
 to_translate_queue.csv     filter output: strategies kept for backtesting
