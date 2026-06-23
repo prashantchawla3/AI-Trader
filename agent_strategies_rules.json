@@ -1,0 +1,148 @@
+{
+  "version": "1.0",
+  "generated": "2026-06-23",
+  "source": "AI-Trader Stage 5 backtest. Code of record: working_strategies.py. Evidence: backtest_results.csv. Human-readable spec: agent_strategies_rules.md.",
+  "disclaimer": "Research tool, not financial advice. Nothing here is approved for live unattended trading. V1 requires a human approval gate.",
+  "execution_model": {
+    "timeframe": "1D",
+    "bar_note": "Crypto is 24/7; treat one bar as a fixed-UTC 24h candle.",
+    "signal_timing": "Compute from data up to and including the just-closed bar.",
+    "fill_timing": "next_bar",
+    "fill_note": "Never act on the bar that produced the signal (no look-ahead). Research engine shifts the position series by 1 bar.",
+    "cost_bps_per_trade": 5,
+    "position_encoding": { "long": 1, "flat": 0, "short": -1 },
+    "pyramiding": false
+  },
+  "deployment_provenance": {
+    "validated_on": "US equities (SPY, QQQ, AAPL, MSFT, GOOGL), daily bars, 2015-2025",
+    "target": "Hyperliquid crypto perps",
+    "requirements": [
+      "Re-validate every strategy out-of-sample on the actual target symbol before live size (guardrail #1).",
+      "Do not add a short leg that was not validated; approved strategies are long/flat, allocation, or market-neutral.",
+      "Lookbacks are in bars, not calendar days; keep them in bars across markets."
+    ]
+  },
+  "global_guardrails": [
+    "No strategy trades live without an out-of-sample backtest on the target symbol.",
+    "Out-of-sample after costs is the bar; in-sample-only performance is ignored as overfit.",
+    "Costs and slippage are charged on every test.",
+    "V1 human approval gate: the agent proposes {symbol, side, target, size, strategy_id, reason}; a human approves before the order is sent.",
+    "Kill switch and risk caps (per-trade max risk, max concurrent positions, daily-loss limit) must exist before live."
+  ],
+  "status_legend": {
+    "APPROVED_FOR_PAPER": "Cleared backtest; may run in paper/sim behind the human gate. Not auto-live.",
+    "HOLD": "Do not deploy until the listed blocker is resolved."
+  },
+  "strategies": [
+    {
+      "id": "S02",
+      "name": "SMA 50/200 crossover",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "indicators": [
+        { "key": "sma_fast", "formula": "SMA(close, 50)" },
+        { "key": "sma_slow", "formula": "SMA(close, 200)" }
+      ],
+      "parameters": { "fast": 50, "slow": 200 },
+      "rules": {
+        "entry_long": "sma_fast > sma_slow",
+        "exit_to_flat": "sma_fast <= sma_slow"
+      },
+      "position_logic": "target = 1 if sma_fast > sma_slow else 0",
+      "evidence_oos": { "sharpe_avg": 0.80, "return_avg": 0.757, "maxdd_avg": -0.251, "positive": "5/5", "beats_buyhold": "0/5" },
+      "notes": "Low-turnover trend filter; whipsaws in choppy markets."
+    },
+    {
+      "id": "S06",
+      "name": "LSMA(25) mean-reversion",
+      "type": "mean-reversion",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 25,
+      "indicators": [
+        { "key": "lsma25", "formula": "LSMA(close, 25)", "definition": "OLS line y=a+b*x fit over last 25 closes (x=0..24); value = a + b*24 (regression endpoint)." }
+      ],
+      "parameters": { "length": 25 },
+      "rules": {
+        "entry_long": "close < lsma25",
+        "exit_to_flat": "close >= lsma25"
+      },
+      "position_logic": "target = 1 if close < lsma25 else 0",
+      "evidence_oos": { "sharpe_avg": 0.78, "return_avg": 0.622, "maxdd_avg": -0.225, "positive": "5/5", "beats_buyhold": "0/5" },
+      "notes": "Counter-trend; can stay long through a downtrend. Lean on global risk caps/kill switch."
+    },
+    {
+      "id": "S10",
+      "name": "Donchian channel breakout",
+      "type": "breakout",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 21,
+      "indicators": [
+        { "key": "upper", "formula": "max(high, 20) over the previous 20 bars (shift 1, exclude current)" },
+        { "key": "lower", "formula": "min(low, 10) over the previous 10 bars (shift 1, exclude current)" }
+      ],
+      "parameters": { "entry_lookback": 20, "exit_lookback": 10 },
+      "rules": {
+        "entry_long": "position == 0 and close > upper",
+        "exit_to_flat": "position == 1 and close < lower"
+      },
+      "position_logic": "long on a 20-bar high breakout; exit on a 10-bar low break",
+      "evidence_oos": { "sharpe_avg": 0.66, "return_avg": 0.384, "maxdd_avg": -0.200, "positive": "5/5", "beats_buyhold": "0/5" },
+      "notes": "Lowest drawdown of the set. Channel form of the catalog's TP/SL breakout; re-test the TP/SL variant if intrabar fills are available."
+    },
+    {
+      "id": "S11",
+      "name": "QQQ/BND regime allocation",
+      "type": "allocation",
+      "direction": "always_invested",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "multi_asset": true,
+      "code_location": "extras_backtest.py",
+      "min_history_bars": 30,
+      "indicators": [
+        { "key": "sma30", "formula": "SMA(risk_asset_close, 30)" }
+      ],
+      "parameters": { "sma_length": 30, "risk_on_weights": { "risk": 0.80, "safe": 0.20 }, "risk_off_weights": { "risk": 0.20, "safe": 0.80 } },
+      "assets": { "risk_asset": "QQQ", "safe_asset": "BND", "crypto_mapping": { "risk_asset": "BTC/ETH", "safe_asset": "USDC/cash" } },
+      "rules": {
+        "risk_on": "risk_asset_close > sma30  -> 80% risk / 20% safe",
+        "risk_off": "risk_asset_close <= sma30 -> 20% risk / 80% safe"
+      },
+      "evidence_oos": { "sharpe": 1.20, "return": 0.791, "maxdd": -0.194, "benchmark": "100% QQQ buy&hold (173%)" },
+      "notes": "Highest Sharpe in the set. Re-validate the SMA30 regime and 80/20 split on the chosen crypto pair before use."
+    },
+    {
+      "id": "S12",
+      "name": "KO/PEP z-score pairs",
+      "type": "stat-arb",
+      "direction": "market_neutral",
+      "status": "HOLD",
+      "blocker": "Run an ADF / Engle-Granger cointegration test on the spread first. If it is not stationary, discard. Do not trade until this passes.",
+      "timeframe": "1D",
+      "multi_asset": true,
+      "code_location": "extras_backtest.py",
+      "min_history_bars": 252,
+      "parameters": { "lookback": 252, "z_entry": 2.0, "z_exit": 0.5 },
+      "indicators": [
+        { "key": "beta", "formula": "rolling_cov(a, b, 252) / rolling_var(b, 252)" },
+        { "key": "spread", "formula": "a_close - beta * b_close" },
+        { "key": "z", "formula": "(spread - rolling_mean(spread, 252)) / rolling_std(spread, 252)" }
+      ],
+      "assets": { "a": "KO", "b": "PEP" },
+      "rules": {
+        "long_spread": "z < -2.0  (long a / short b)",
+        "short_spread": "z > 2.0   (short a / long b)",
+        "exit_to_flat": "abs(z) < 0.5"
+      },
+      "evidence_oos": { "sharpe": 0.22, "return": 0.055, "maxdd": -0.148 },
+      "notes": "Weak edge; nominally beat a cash benchmark only because market-neutral. On hold pending cointegration test."
+    }
+  ]
+}
