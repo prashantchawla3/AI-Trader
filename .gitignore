@@ -3,14 +3,13 @@ __pycache__/
 *.py[cod]
 *.pdf
 install_log.txt
-
 # Virtual environments
 venv/
 .venv/
 env/
-
 # Claude Code / editor state
 .claude/
-
-# Stale nested duplicate of this repo (was an accidental embedded clone)
+# Stale nested duplicate of this repo
 AI-Trader/
+bot_state.json
+bot_log.csv
