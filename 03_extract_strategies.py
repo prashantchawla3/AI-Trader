@@ -17,7 +17,7 @@ Setup:
 import csv, glob, json, os, re
 from llm import chat
 
-TRANSCRIPT_DIR="transcripts"; MANIFEST="manifest.csv"
+TRANSCRIPT_DIR=os.environ.get("TRANSCRIPT_DIR","transcripts"); MANIFEST="manifest.csv"
 OUT_JSONL="strategies.jsonl"; OUT_CSV="strategies.csv"
 MAX_CHARS=24000  # trim very long transcripts to control token cost
 
