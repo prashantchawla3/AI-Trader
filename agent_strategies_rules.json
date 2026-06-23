@@ -1,7 +1,7 @@
 {
-  "version": "1.0",
-  "generated": "2026-06-23",
-  "source": "AI-Trader Stage 5 backtest. Code of record: working_strategies.py. Evidence: backtest_results.csv. Human-readable spec: agent_strategies_rules.md.",
+  "version": "2.0",
+  "generated": "auto",
+  "source": "AI-Trader Stage 6 backtest. Code of record: generated_strats.py / strategy_templates.py. Evidence: backtest_results.csv.",
   "disclaimer": "Research tool, not financial advice. Nothing here is approved for live unattended trading. V1 requires a human approval gate.",
   "execution_model": {
     "timeframe": "1D",
@@ -10,11 +10,15 @@
     "fill_timing": "next_bar",
     "fill_note": "Never act on the bar that produced the signal (no look-ahead). Research engine shifts the position series by 1 bar.",
     "cost_bps_per_trade": 5,
-    "position_encoding": { "long": 1, "flat": 0, "short": -1 },
+    "position_encoding": {
+      "long": 1,
+      "flat": 0,
+      "short": -1
+    },
     "pyramiding": false
   },
   "deployment_provenance": {
-    "validated_on": "US equities (SPY, QQQ, AAPL, MSFT, GOOGL), daily bars, 2015-2025",
+    "validated_on": "US equities (SPY, QQQ, AAPL, MSFT, GOOGL), daily bars, last 10y",
     "target": "Hyperliquid crypto perps",
     "requirements": [
       "Re-validate every strategy out-of-sample on the actual target symbol before live size (guardrail #1).",
@@ -35,114 +39,822 @@
   },
   "strategies": [
     {
-      "id": "S02",
-      "name": "SMA 50/200 crossover",
-      "type": "trend-following",
-      "direction": "long_flat",
-      "status": "APPROVED_FOR_PAPER",
-      "timeframe": "1D",
-      "min_history_bars": 200,
-      "indicators": [
-        { "key": "sma_fast", "formula": "SMA(close, 50)" },
-        { "key": "sma_slow", "formula": "SMA(close, 200)" }
-      ],
-      "parameters": { "fast": 50, "slow": 200 },
-      "rules": {
-        "entry_long": "sma_fast > sma_slow",
-        "exit_to_flat": "sma_fast <= sma_slow"
-      },
-      "position_logic": "target = 1 if sma_fast > sma_slow else 0",
-      "evidence_oos": { "sharpe_avg": 0.80, "return_avg": 0.757, "maxdd_avg": -0.251, "positive": "5/5", "beats_buyhold": "0/5" },
-      "notes": "Low-turnover trend filter; whipsaws in choppy markets."
-    },
-    {
-      "id": "S06",
-      "name": "LSMA(25) mean-reversion",
-      "type": "mean-reversion",
-      "direction": "long_flat",
-      "status": "APPROVED_FOR_PAPER",
-      "timeframe": "1D",
-      "min_history_bars": 25,
-      "indicators": [
-        { "key": "lsma25", "formula": "LSMA(close, 25)", "definition": "OLS line y=a+b*x fit over last 25 closes (x=0..24); value = a + b*24 (regression endpoint)." }
-      ],
-      "parameters": { "length": 25 },
-      "rules": {
-        "entry_long": "close < lsma25",
-        "exit_to_flat": "close >= lsma25"
-      },
-      "position_logic": "target = 1 if close < lsma25 else 0",
-      "evidence_oos": { "sharpe_avg": 0.78, "return_avg": 0.622, "maxdd_avg": -0.225, "positive": "5/5", "beats_buyhold": "0/5" },
-      "notes": "Counter-trend; can stay long through a downtrend. Lean on global risk caps/kill switch."
-    },
-    {
-      "id": "S10",
-      "name": "Donchian channel breakout",
+      "id": "G001",
+      "name": "Price Channel Breakout Strategy",
       "type": "breakout",
       "direction": "long_flat",
       "status": "APPROVED_FOR_PAPER",
       "timeframe": "1D",
       "min_history_bars": 21,
+      "family": "donchian_breakout",
+      "method": "template",
+      "parameters": {
+        "entry_n": 20,
+        "exit_n": 20
+      },
       "indicators": [
-        { "key": "upper", "formula": "max(high, 20) over the previous 20 bars (shift 1, exclude current)" },
-        { "key": "lower", "formula": "min(low, 10) over the previous 10 bars (shift 1, exclude current)" }
+        {
+          "key": "upper",
+          "formula": "max(high, 20) over previous 20 bars (shift 1)"
+        },
+        {
+          "key": "lower",
+          "formula": "min(low, 20) over previous 20 bars (shift 1)"
+        }
       ],
-      "parameters": { "entry_lookback": 20, "exit_lookback": 10 },
       "rules": {
         "entry_long": "position == 0 and close > upper",
         "exit_to_flat": "position == 1 and close < lower"
       },
-      "position_logic": "long on a 20-bar high breakout; exit on a 10-bar low break",
-      "evidence_oos": { "sharpe_avg": 0.66, "return_avg": 0.384, "maxdd_avg": -0.200, "positive": "5/5", "beats_buyhold": "0/5" },
-      "notes": "Lowest drawdown of the set. Channel form of the catalog's TP/SL breakout; re-test the TP/SL variant if intrabar fills are available."
+      "evidence_oos": {
+        "sharpe_avg": 0.78,
+        "return_avg": 0.59,
+        "maxdd_avg": -0.226,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "aMrKe4ndzCA",
+        "url": "https://www.youtube.com/watch?v=aMrKe4ndzCA"
+      },
+      "notes": "Donchian 20/20 channel breakout; typically the lowest-drawdown of the set."
     },
     {
-      "id": "S11",
-      "name": "QQQ/BND regime allocation",
+      "id": "G003",
+      "name": "Long-only Momentum Strategy with 200-day SMA Exit",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 50,
+        "slow": 200,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,50)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,200)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.8,
+        "return_avg": 0.754,
+        "maxdd_avg": -0.251,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "unsa_gXPAJ4",
+        "url": "https://www.youtube.com/watch?v=unsa_gXPAJ4"
+      },
+      "notes": "SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G004",
+      "name": "8 SMA and 25 SMA Crossover Strategy",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 25,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 8,
+        "slow": 25,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,8)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,25)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.88,
+        "return_avg": 0.759,
+        "maxdd_avg": -0.195,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "sYRCzSbvOpQ",
+        "url": "https://www.youtube.com/watch?v=sYRCzSbvOpQ"
+      },
+      "notes": "SMA 8/25 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G010",
+      "name": "DCA Pop",
+      "type": "mean-reversion",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 20,
+      "family": "bollinger",
+      "method": "template",
+      "parameters": {
+        "n": 20,
+        "k": 2.0,
+        "rsi_n": 14,
+        "rsi_lower": 30.0,
+        "rsi_upper": 70.0,
+        "time_stop": 0
+      },
+      "indicators": [
+        {
+          "key": "mid",
+          "formula": "SMA(close,20)"
+        },
+        {
+          "key": "lower",
+          "formula": "mid - 2.0*std(close,20)"
+        },
+        {
+          "key": "upper",
+          "formula": "mid + 2.0*std(close,20)"
+        },
+        {
+          "key": "rsi",
+          "formula": "RSI(close,14)"
+        }
+      ],
+      "rules": {
+        "entry_long": "close <= lower AND rsi < 30.0",
+        "exit_to_flat": "close >= upper AND rsi > 70.0"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.81,
+        "return_avg": 0.674,
+        "maxdd_avg": -0.237,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "YQGp7Fk2X3E",
+        "url": "https://www.youtube.com/watch?v=YQGp7Fk2X3E"
+      },
+      "notes": "Bollinger-band reversion gated by RSI, with a time stop."
+    },
+    {
+      "id": "G012",
+      "name": "Moving Average Crossover",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 20,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 5,
+        "slow": 20,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,5)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,20)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.82,
+        "return_avg": 0.61,
+        "maxdd_avg": -0.21,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "b3VFMdjBfKA",
+        "url": "https://www.youtube.com/watch?v=b3VFMdjBfKA"
+      },
+      "notes": "SMA 5/20 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G013",
+      "name": "Breakout Strategy",
+      "type": "breakout",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 21,
+      "family": "donchian_breakout",
+      "method": "template",
+      "parameters": {
+        "entry_n": 20,
+        "exit_n": 10
+      },
+      "indicators": [
+        {
+          "key": "upper",
+          "formula": "max(high, 20) over previous 20 bars (shift 1)"
+        },
+        {
+          "key": "lower",
+          "formula": "min(low, 10) over previous 10 bars (shift 1)"
+        }
+      ],
+      "rules": {
+        "entry_long": "position == 0 and close > upper",
+        "exit_to_flat": "position == 1 and close < lower"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.66,
+        "return_avg": 0.384,
+        "maxdd_avg": -0.2,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "Z7MA_68HmF0",
+        "url": "https://www.youtube.com/watch?v=Z7MA_68HmF0"
+      },
+      "notes": "Donchian 20/10 channel breakout; typically the lowest-drawdown of the set."
+    },
+    {
+      "id": "G019",
+      "name": "Least Squares Moving Average (LSMA) Trading Strategy",
+      "type": "mean-reversion",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 25,
+      "family": "lsma_meanrev",
+      "method": "template",
+      "parameters": {
+        "n": 25
+      },
+      "indicators": [
+        {
+          "key": "lsma",
+          "formula": "LSMA(close,25): OLS endpoint a+b*(24) over last 25 closes"
+        }
+      ],
+      "rules": {
+        "entry_long": "close < lsma",
+        "exit_to_flat": "close >= lsma"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.78,
+        "return_avg": 0.618,
+        "maxdd_avg": -0.225,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "sESQpRoo994",
+        "url": "https://www.youtube.com/watch?v=sESQpRoo994"
+      },
+      "notes": "Long while price is below its least-squares regression line (counter-trend)."
+    },
+    {
+      "id": "G020",
+      "name": "SMA Bot for HIP-3 Stock Trading",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 50,
+        "slow": 200,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,50)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,200)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.8,
+        "return_avg": 0.754,
+        "maxdd_avg": -0.251,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "PdmdT0uMGj8",
+        "url": "https://www.youtube.com/watch?v=PdmdT0uMGj8"
+      },
+      "notes": "SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G025",
+      "name": "Simple Moving Average Crossover Strategy",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 100,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 2,
+        "slow": 100,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,2)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,100)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.79,
+        "return_avg": 0.644,
+        "maxdd_avg": -0.205,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "Ets0xGCjQ14",
+        "url": "https://www.youtube.com/watch?v=Ets0xGCjQ14"
+      },
+      "notes": "SMA 2/100 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G026",
+      "name": "Simple Moving Average Crossover",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 20,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 10,
+        "slow": 20,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,10)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,20)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.69,
+        "return_avg": 0.597,
+        "maxdd_avg": -0.243,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "4YmRpo60kow",
+        "url": "https://www.youtube.com/watch?v=4YmRpo60kow"
+      },
+      "notes": "SMA 10/20 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G028",
+      "name": "Two Moving Average Crossover",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 50,
+        "slow": 200,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,50)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,200)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.8,
+        "return_avg": 0.754,
+        "maxdd_avg": -0.251,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "29_FVmMtDWw",
+        "url": "https://www.youtube.com/watch?v=29_FVmMtDWw"
+      },
+      "notes": "SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G030",
+      "name": "Golden Cross Moving Average Strategy (EV Stocks)",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 50,
+        "slow": 200,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,50)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,200)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.8,
+        "return_avg": 0.754,
+        "maxdd_avg": -0.251,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "6FQz7MDTogs",
+        "url": "https://www.youtube.com/watch?v=6FQz7MDTogs"
+      },
+      "notes": "SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G032",
+      "name": "Moving Average Crossover EA",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 200,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 50,
+        "slow": 200,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,50)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,200)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.8,
+        "return_avg": 0.754,
+        "maxdd_avg": -0.251,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "xK_yac8QF-I",
+        "url": "https://www.youtube.com/watch?v=xK_yac8QF-I"
+      },
+      "notes": "SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G035",
+      "name": "SMA Crossover Strategy",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 20,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 2,
+        "slow": 20,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,2)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,20)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.81,
+        "return_avg": 0.641,
+        "maxdd_avg": -0.201,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "j6K-pyF1hdI",
+        "url": "https://www.youtube.com/watch?v=j6K-pyF1hdI"
+      },
+      "notes": "SMA 2/20 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G036",
+      "name": "Bitcoin SMA Crossover Strategy",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 40,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 20,
+        "slow": 40,
+        "ma": "sma"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "SMA(close,20)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "SMA(close,40)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.73,
+        "return_avg": 0.601,
+        "maxdd_avg": -0.232,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "QLYmpGlZpG0",
+        "url": "https://www.youtube.com/watch?v=QLYmpGlZpG0"
+      },
+      "notes": "SMA 20/40 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G037",
+      "name": "Multi-Timeframe Trend-Following with Price Action",
+      "type": "breakout",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 21,
+      "family": "donchian_breakout",
+      "method": "template",
+      "parameters": {
+        "entry_n": 20,
+        "exit_n": 10
+      },
+      "indicators": [
+        {
+          "key": "upper",
+          "formula": "max(high, 20) over previous 20 bars (shift 1)"
+        },
+        {
+          "key": "lower",
+          "formula": "min(low, 10) over previous 10 bars (shift 1)"
+        }
+      ],
+      "rules": {
+        "entry_long": "position == 0 and close > upper",
+        "exit_to_flat": "position == 1 and close < lower"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.66,
+        "return_avg": 0.384,
+        "maxdd_avg": -0.2,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "4r55Vo-mOM8",
+        "url": "https://www.youtube.com/watch?v=4r55Vo-mOM8"
+      },
+      "notes": "Donchian 20/10 channel breakout; typically the lowest-drawdown of the set."
+    },
+    {
+      "id": "G039",
+      "name": "AI Swing Trade Analyzer",
+      "type": "breakout",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 21,
+      "family": "donchian_breakout",
+      "method": "template",
+      "parameters": {
+        "entry_n": 20,
+        "exit_n": 10
+      },
+      "indicators": [
+        {
+          "key": "upper",
+          "formula": "max(high, 20) over previous 20 bars (shift 1)"
+        },
+        {
+          "key": "lower",
+          "formula": "min(low, 10) over previous 10 bars (shift 1)"
+        }
+      ],
+      "rules": {
+        "entry_long": "position == 0 and close > upper",
+        "exit_to_flat": "position == 1 and close < lower"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.66,
+        "return_avg": 0.384,
+        "maxdd_avg": -0.2,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "86ZpQn85nCc",
+        "url": "https://www.youtube.com/watch?v=86ZpQn85nCc"
+      },
+      "notes": "Donchian 20/10 channel breakout; typically the lowest-drawdown of the set."
+    },
+    {
+      "id": "G040",
+      "name": "Multi-Asset Trend Following with Price Action",
+      "type": "trend-following",
+      "direction": "long_flat",
+      "status": "APPROVED_FOR_PAPER",
+      "timeframe": "1D",
+      "min_history_bars": 50,
+      "family": "ma_crossover",
+      "method": "template",
+      "parameters": {
+        "fast": 20,
+        "slow": 50,
+        "ma": "ema"
+      },
+      "indicators": [
+        {
+          "key": "ma_fast",
+          "formula": "EMA(close,20)"
+        },
+        {
+          "key": "ma_slow",
+          "formula": "EMA(close,50)"
+        }
+      ],
+      "rules": {
+        "entry_long": "ma_fast > ma_slow",
+        "exit_to_flat": "ma_fast <= ma_slow"
+      },
+      "evidence_oos": {
+        "sharpe_avg": 0.7,
+        "return_avg": 0.566,
+        "maxdd_avg": -0.225,
+        "positive": "5/5",
+        "beats_buyhold": "0/5"
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "MnG2Ru_LVEw",
+        "url": "https://www.youtube.com/watch?v=MnG2Ru_LVEw"
+      },
+      "notes": "EMA 20/50 crossover; low-turnover trend filter, whipsaws in choppy markets."
+    },
+    {
+      "id": "G005",
+      "name": "Dynamic Allocation Strategy (QQQ/BND)",
       "type": "allocation",
       "direction": "always_invested",
       "status": "APPROVED_FOR_PAPER",
       "timeframe": "1D",
-      "multi_asset": true,
-      "code_location": "extras_backtest.py",
       "min_history_bars": 30,
-      "indicators": [
-        { "key": "sma30", "formula": "SMA(risk_asset_close, 30)" }
-      ],
-      "parameters": { "sma_length": 30, "risk_on_weights": { "risk": 0.80, "safe": 0.20 }, "risk_off_weights": { "risk": 0.20, "safe": 0.80 } },
-      "assets": { "risk_asset": "QQQ", "safe_asset": "BND", "crypto_mapping": { "risk_asset": "BTC/ETH", "safe_asset": "USDC/cash" } },
-      "rules": {
-        "risk_on": "risk_asset_close > sma30  -> 80% risk / 20% safe",
-        "risk_off": "risk_asset_close <= sma30 -> 20% risk / 80% safe"
+      "family": "allocation",
+      "method": "template",
+      "parameters": {
+        "sma_n": 30,
+        "on_risk_w": 0.8,
+        "off_risk_w": 0.2
       },
-      "evidence_oos": { "sharpe": 1.20, "return": 0.791, "maxdd": -0.194, "benchmark": "100% QQQ buy&hold (173%)" },
-      "notes": "Highest Sharpe in the set. Re-validate the SMA30 regime and 80/20 split on the chosen crypto pair before use."
-    },
-    {
-      "id": "S12",
-      "name": "KO/PEP z-score pairs",
-      "type": "stat-arb",
-      "direction": "market_neutral",
-      "status": "HOLD",
-      "blocker": "Run an ADF / Engle-Granger cointegration test on the spread first. If it is not stationary, discard. Do not trade until this passes.",
-      "timeframe": "1D",
+      "indicators": [
+        {
+          "key": "sma",
+          "formula": "SMA(risk_close,30)"
+        }
+      ],
+      "rules": {
+        "risk_on": "risk_close > sma -> 80% risk / 19% safe",
+        "risk_off": "risk_close <= sma -> 20% risk / 80% safe"
+      },
+      "evidence_oos": {
+        "sharpe": 1.19,
+        "return": 0.788,
+        "maxdd": -0.194
+      },
+      "tier": "ROBUST",
+      "source": {
+        "video_id": "-F3ITjfelrM",
+        "url": "https://www.youtube.com/watch?v=-F3ITjfelrM"
+      },
+      "notes": "Two-asset regime allocation. Re-validate the SMA regime and weights on the chosen crypto pair.",
       "multi_asset": true,
-      "code_location": "extras_backtest.py",
-      "min_history_bars": 252,
-      "parameters": { "lookback": 252, "z_entry": 2.0, "z_exit": 0.5 },
-      "indicators": [
-        { "key": "beta", "formula": "rolling_cov(a, b, 252) / rolling_var(b, 252)" },
-        { "key": "spread", "formula": "a_close - beta * b_close" },
-        { "key": "z", "formula": "(spread - rolling_mean(spread, 252)) / rolling_std(spread, 252)" }
-      ],
-      "assets": { "a": "KO", "b": "PEP" },
-      "rules": {
-        "long_spread": "z < -2.0  (long a / short b)",
-        "short_spread": "z > 2.0   (short a / long b)",
-        "exit_to_flat": "abs(z) < 0.5"
+      "assets": {
+        "risk": "QQQ",
+        "safe": "BND"
       },
-      "evidence_oos": { "sharpe": 0.22, "return": 0.055, "maxdd": -0.148 },
-      "notes": "Weak edge; nominally beat a cash benchmark only because market-neutral. On hold pending cointegration test."
+      "code_location": "generated_strats.py (MULTI)"
     }
   ]
 }

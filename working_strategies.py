@@ -6,56 +6,61 @@ The strategies that SURVIVED honest out-of-sample backtesting (after
 
 Two honest tiers:
   BEATS_BUYHOLD : beat buy&hold OOS net return on a majority of the basket.
-                  (A very high bar in the 2015-2025 bull market.)
   ROBUST        : positive OOS net return on EVERY tested ticker AND mean
-                  OOS Sharpe >= 0.65. Stands on its own for an active agent,
-                  even where it does not out-run a buy&hold benchmark.
+                  OOS Sharpe >= 0.65. Stands on its own for an active agent.
 
-Each single-ticker strategy is a position function: df -> Series
-(1=long, 0=flat, -1=short), drop-in for 04_backtest.py. S11/S12 are
-multi-ticker and live in extras_backtest.py; if they survived they are
-listed in the registries below (value None) but not redefined here.
-
-These are the candidates that advance to Stage 6 (code as agent rules).
+Code of record is generated_strats.py (+ strategy_templates.py); this module
+re-exports the survivors as importable registries with their evidence. The
+survivors advance to Stage 7 (agent rules).
 Research tool, not financial advice.
 """
-import numpy as np, pandas as pd
+from generated_strats import STRATS as _SINGLE, MULTI as _MULTI, META
 
-from catalog_strats import _rsi, _lsma
-
-# [ROBUST] s02: beats-B&H 0/5, positive 5/5, avg OOS return 75.7%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
-def s02_sma_cross(df):
-    f = df["Close"].rolling(50).mean(); s = df["Close"].rolling(200).mean()
-    return (f > s).astype(float)
-
-# [ROBUST] s06: beats-B&H 0/5, positive 5/5, avg OOS return 62.2%, avg OOS Sharpe 0.78, avg OOS MaxDD -22.5%
-def s06_lsma(df):
-    return (df["Close"] < _lsma(df["Close"], 25)).astype(float)
-
-# [ROBUST] s10: beats-B&H 0/5, positive 5/5, avg OOS return 38.4%, avg OOS Sharpe 0.66, avg OOS MaxDD -20.0%
-def s10_breakout(df, n=20, exit_n=10):
-    hh = df["High"].rolling(n).max().shift(1)
-    ll = df["Low"].rolling(exit_n).min().shift(1)
-    entry = (df["Close"] > hh).fillna(False).values
-    ex    = (df["Close"] < ll).fillna(False).values
-    pos = np.zeros(len(df)); st = 0
-    for i in range(len(df)):
-        if st == 0 and entry[i]: st = 1
-        elif st == 1 and ex[i]: st = 0
-        pos[i] = st
-    return pd.Series(pos, index=df.index)
+# [ROBUST] g001 (Price Channel Breakout Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 59.0%, avg OOS Sharpe 0.78, avg OOS MaxDD -22.6%
+# [ROBUST] g003 (Long-only Momentum Strategy with 200-day SMA Exit): beats-B&H 0/5, positive 5/5, avg OOS return 75.4%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
+# [ROBUST] g004 (8 SMA and 25 SMA Crossover Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 75.9%, avg OOS Sharpe 0.88, avg OOS MaxDD -19.5%
+# [ROBUST] g010 (DCA Pop): beats-B&H 0/5, positive 5/5, avg OOS return 67.4%, avg OOS Sharpe 0.81, avg OOS MaxDD -23.7%
+# [ROBUST] g012 (Moving Average Crossover): beats-B&H 0/5, positive 5/5, avg OOS return 61.0%, avg OOS Sharpe 0.82, avg OOS MaxDD -21.0%
+# [ROBUST] g013 (Breakout Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 38.4%, avg OOS Sharpe 0.66, avg OOS MaxDD -20.0%
+# [ROBUST] g019 (Least Squares Moving Average (LSMA) Trading Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 61.8%, avg OOS Sharpe 0.78, avg OOS MaxDD -22.5%
+# [ROBUST] g020 (SMA Bot for HIP-3 Stock Trading): beats-B&H 0/5, positive 5/5, avg OOS return 75.4%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
+# [ROBUST] g025 (Simple Moving Average Crossover Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 64.4%, avg OOS Sharpe 0.79, avg OOS MaxDD -20.5%
+# [ROBUST] g026 (Simple Moving Average Crossover): beats-B&H 0/5, positive 5/5, avg OOS return 59.7%, avg OOS Sharpe 0.69, avg OOS MaxDD -24.3%
+# [ROBUST] g028 (Two Moving Average Crossover): beats-B&H 0/5, positive 5/5, avg OOS return 75.4%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
+# [ROBUST] g030 (Golden Cross Moving Average Strategy (EV Stocks)): beats-B&H 0/5, positive 5/5, avg OOS return 75.4%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
+# [ROBUST] g032 (Moving Average Crossover EA): beats-B&H 0/5, positive 5/5, avg OOS return 75.4%, avg OOS Sharpe 0.80, avg OOS MaxDD -25.1%
+# [ROBUST] g035 (SMA Crossover Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 64.1%, avg OOS Sharpe 0.81, avg OOS MaxDD -20.1%
+# [ROBUST] g036 (Bitcoin SMA Crossover Strategy): beats-B&H 0/5, positive 5/5, avg OOS return 60.1%, avg OOS Sharpe 0.73, avg OOS MaxDD -23.2%
+# [ROBUST] g037 (Multi-Timeframe Trend-Following with Price Action): beats-B&H 0/5, positive 5/5, avg OOS return 38.4%, avg OOS Sharpe 0.66, avg OOS MaxDD -20.0%
+# [ROBUST] g039 (AI Swing Trade Analyzer): beats-B&H 0/5, positive 5/5, avg OOS return 38.4%, avg OOS Sharpe 0.66, avg OOS MaxDD -20.0%
+# [ROBUST] g040 (Multi-Asset Trend Following with Price Action): beats-B&H 0/5, positive 5/5, avg OOS return 56.6%, avg OOS Sharpe 0.70, avg OOS MaxDD -22.5%
+# [ROBUST] g005 (Dynamic Allocation Strategy (QQQ/BND)): beats-B&H 0/1, positive 1/1, avg OOS return 78.8%, avg OOS Sharpe 1.19, avg OOS MaxDD -19.4%
 
 # Tier 1: beat buy&hold OOS net return (majority of basket).
 BEATS_BUYHOLD = {
-    "s12": None,   # multi-ticker -> extras_backtest.py
 }
 
 # Tier 2: standalone-robust (positive everywhere, mean OOS Sharpe >= 0.65).
 ROBUST = {
-    "s02": s02_sma_cross,
-    "s06": s06_lsma,
-    "s10": s10_breakout,
-    "s11": None,   # multi-ticker -> extras_backtest.py
+    "g001": _SINGLE["g001"],
+    "g003": _SINGLE["g003"],
+    "g004": _SINGLE["g004"],
+    "g010": _SINGLE["g010"],
+    "g012": _SINGLE["g012"],
+    "g013": _SINGLE["g013"],
+    "g019": _SINGLE["g019"],
+    "g020": _SINGLE["g020"],
+    "g025": _SINGLE["g025"],
+    "g026": _SINGLE["g026"],
+    "g028": _SINGLE["g028"],
+    "g030": _SINGLE["g030"],
+    "g032": _SINGLE["g032"],
+    "g035": _SINGLE["g035"],
+    "g036": _SINGLE["g036"],
+    "g037": _SINGLE["g037"],
+    "g039": _SINGLE["g039"],
+    "g040": _SINGLE["g040"],
+    "g005": _MULTI["g005"]["fn"],
 }
 
 # Combined registry of everything that survived -> next stage.

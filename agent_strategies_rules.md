@@ -1,195 +1,455 @@
 # Agent Strategy Rules
 
-**Hand-off spec for the bot/agent developer.** These are the trading strategies
-that survived honest out-of-sample backtesting (Stage 5 of the pipeline). Each is
-written here as explicit, unambiguous rules so the agent can implement them without
-re-reading the research code.
+**Hand-off spec for the bot/agent developer.** Auto-generated from the Stage-6
+backtest survivors. Source of truth (code): `generated_strats.py` /
+`strategy_templates.py`. Evidence: `backtest_results.csv`.
 
-- **Source of truth (code):** [working_strategies.py](working_strategies.py) — the exact position functions.
-- **Evidence:** [backtest_results.csv](backtest_results.csv) — full per-ticker grid.
-- **Machine-readable version of this doc:** [agent_strategies_rules.json](agent_strategies_rules.json) — parse this in the bot.
-- **How they were chosen:** [OVERVIEW.md](OVERVIEW.md) + `run_backtests.py`.
+> ⚠️ Research tool, not financial advice. Nothing here is approved for live unattended trading. V1 requires a human approval gate.
 
-> ⚠️ **This is a research tool, not financial advice. Nothing here is approved for
-> live, unattended trading.** V1 runs behind a mandatory human approval gate.
+## Execution model
 
----
+- **Timeframe:** 1D (Crypto is 24/7; treat one bar as a fixed-UTC 24h candle.)
+- **Signal timing:** Compute from data up to and including the just-closed bar.
+- **Fill timing:** next_bar — Never act on the bar that produced the signal (no look-ahead). Research engine shifts the position series by 1 bar.
+- **Costs:** 5 bps per trade. Position encoding {'long': 1, 'flat': 0, 'short': -1}. Pyramiding: False.
 
-## 0. How to read these rules (execution model)
+## Global guardrails (non-negotiable)
 
-Every strategy below is a function of price bars that outputs a **target position**:
-`+1 = long`, `0 = flat`, `-1 = short`. The agent's job is to move the account toward
-that target. The backtest that validated these used this exact model — match it:
+1. No strategy trades live without an out-of-sample backtest on the target symbol.
+2. Out-of-sample after costs is the bar; in-sample-only performance is ignored as overfit.
+3. Costs and slippage are charged on every test.
+4. V1 human approval gate: the agent proposes {symbol, side, target, size, strategy_id, reason}; a human approves before the order is sent.
+5. Kill switch and risk caps (per-trade max risk, max concurrent positions, daily-loss limit) must exist before live.
 
-| Aspect | Rule |
-|--------|------|
-| **Bar / timeframe** | Daily bars (`1D`). One bar = one decision. (Crypto is 24/7, so a "day" is a 24h candle — pick a fixed UTC close.) |
-| **Signal timing** | Compute the signal from data **up to and including the just-closed bar**. |
-| **Fill timing** | Act on the **next bar** — never on the bar that produced the signal (no look-ahead). The research engine enforces this by shifting the position series by 1 bar. |
-| **Costs** | Assume **5 bps per trade** (per change in position). Real Hyperliquid fees + slippage must be modelled before any size goes live. |
-| **One signal → one position** per symbol. No pyramiding/averaging unless a rule says so (none here do). |
+### Validation provenance
 
-### Validation provenance (read this before deploying)
-These edges were measured on **US equities (SPY, QQQ, AAPL, MSFT, GOOGL) on daily bars,
-2015–2025**. The bot targets **Hyperliquid crypto perps**. Therefore:
+- Validated on: US equities (SPY, QQQ, AAPL, MSFT, GOOGL), daily bars, last 10y; target: Hyperliquid crypto perps.
+- Re-validate every strategy out-of-sample on the actual target symbol before live size (guardrail #1).
+- Do not add a short leg that was not validated; approved strategies are long/flat, allocation, or market-neutral.
+- Lookbacks are in bars, not calendar days; keep them in bars across markets.
 
-1. **Re-validate every strategy on the actual target symbols** (BTC, ETH, etc.) before it trades real size. An equity edge is a *hypothesis* on crypto, not a result. This is guardrail #1.
-2. Strategies here are **long/flat** (or market-neutral / allocation). Crypto perps allow native shorts, but **do not add a short leg that wasn't validated** — the backtest didn't test it.
-3. Lookback lengths are in **bars**, not calendar days. Keep them in bars when you switch markets.
+## Strategies
 
----
-
-## 1. Global guardrails (the agent must enforce these)
-
-These are non-negotiable and sit *outside* any individual strategy:
-
-1. **No strategy trades live without an out-of-sample backtest on the target symbol.** "Looks reasonable" is not a result.
-2. **Out-of-sample, after costs, is the bar.** In-sample-only performance is overfit and ignored.
-3. **Costs and slippage are charged on every test.** No frictionless assumptions.
-4. **Human approval gate (V1).** The agent *proposes* a trade (symbol, side, size, reason, strategy id); a human approves before anything is sent to the exchange. No unattended execution in V1.
-5. **Kill switch + risk caps.** Per-trade max risk, max concurrent positions, and a global daily-loss kill switch must exist before live. (Values are a deployment decision — not set by the backtest.)
-
----
-
-## 2. Approved strategies (passed the standalone-robust bar)
-
-"Robust" = positive out-of-sample net return on **every** tested ticker **and** mean
-OOS Sharpe ≥ 0.65, after costs. None of these beat a 2015–2025 buy-and-hold (almost
-nothing does), but each stands on its own — which is what matters for an active agent.
-
-> **Status legend:** `APPROVED_FOR_PAPER` = cleared backtest, may run in paper/sim and
-> behind the human gate; **not** auto-live. `HOLD` = do not deploy yet.
-
----
-
-### S02 — SMA 50/200 Crossover  *(trend-following, long/flat)*
-**Status:** `APPROVED_FOR_PAPER`
+### G001 — Price Channel Breakout Strategy  *(breakout, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `donchian_breakout`  ·  method `template`  ·  tier ROBUST
 
 **Indicators**
-- `sma_fast = SMA(close, 50)` — 50-bar simple moving average
-- `sma_slow = SMA(close, 200)` — 200-bar simple moving average
+- `upper` = max(high, 20) over previous 20 bars (shift 1)
+- `lower` = min(low, 20) over previous 20 bars (shift 1)
 
 **Rules**
-- **Entry (→ long):** when `sma_fast > sma_slow` (the classic "golden cross" regime).
-- **Exit (→ flat):** when `sma_fast <= sma_slow` ("death cross").
-- Long-only. Position is simply `1 if sma_fast > sma_slow else 0`.
+- **entry_long:** position == 0 and close > upper
+- **exit_to_flat:** position == 1 and close < lower
 
-**Evidence (OOS, after costs):** positive 5/5 tickers · avg Sharpe **0.80** · avg return 75.7% · avg MaxDD −25.1% · beats buy&hold 0/5.
+**Parameters:** `{'entry_n': 20, 'exit_n': 20}`
 
-**Notes:** Slow, low-turnover trend filter. Whipsaws in choppy/range markets (hence the −25% drawdown). Needs ≥200 bars of history before it produces a signal.
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.78, 'return_avg': 0.59, 'maxdd_avg': -0.226, 'positive': '5/5', 'beats_buyhold': '0/5'}
 
-```
-if SMA(close,50) > SMA(close,200):  target = +1   # long
-else:                               target =  0   # flat
-```
+**Notes:** Donchian 20/20 channel breakout; typically the lowest-drawdown of the set.
+
+*Source video:* https://www.youtube.com/watch?v=aMrKe4ndzCA
 
 ---
 
-### S06 — LSMA(25) Mean-Reversion  *(mean-reversion, long/flat)*
-**Status:** `APPROVED_FOR_PAPER`
+### G003 — Long-only Momentum Strategy with 200-day SMA Exit  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
 
 **Indicators**
-- `lsma25 = LSMA(close, 25)` — **least-squares moving average**: fit an OLS line `y = a + b·x` over the last 25 closes (`x = 0..24`) and take the line's **endpoint** value `a + b·24`. (This is the linear-regression "value now", aka the regression trendline.)
+- `ma_fast` = SMA(close,50)
+- `ma_slow` = SMA(close,200)
 
 **Rules**
-- **Entry (→ long):** when `close < lsma25` — price has dipped below its own regression trendline (buy the dip).
-- **Exit (→ flat):** when `close >= lsma25` — price has reverted back to/above the line.
-- Long-only. Position is `1 if close < lsma25 else 0`.
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
 
-**Evidence (OOS, after costs):** positive 5/5 · avg Sharpe **0.78** · avg return 62.2% · avg MaxDD −22.5% · beats buy&hold 0/5.
+**Parameters:** `{'fast': 50, 'slow': 200, 'ma': 'sma'}`
 
-**Notes:** Counter-trend. Because it goes long *whenever* price is below the line, it can stay long through a sustained downtrend — pair it with the global risk caps / kill switch. Higher turnover than S02.
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.8, 'return_avg': 0.754, 'maxdd_avg': -0.251, 'positive': '5/5', 'beats_buyhold': '0/5'}
 
-```
-lsma = ols_endpoint(close[-25:])     # a + b*24 from polyfit(x=0..24, close, 1)
-if close < lsma:  target = +1
-else:             target =  0
-```
+**Notes:** SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=unsa_gXPAJ4
 
 ---
 
-### S10 — Donchian Channel Breakout  *(breakout, long/flat)*  ⭐ lowest drawdown
-**Status:** `APPROVED_FOR_PAPER`
+### G004 — 8 SMA and 25 SMA Crossover Strategy  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
 
 **Indicators**
-- `upper = max(high, 20)` over the **previous** 20 bars (exclude the current bar — shift by 1).
-- `lower = min(low, 10)` over the **previous** 10 bars (exclude the current bar — shift by 1).
+- `ma_fast` = SMA(close,8)
+- `ma_slow` = SMA(close,25)
 
 **Rules**
-- **Entry (→ long):** when `close > upper` — a fresh 20-bar high breakout.
-- **Exit (→ flat):** when `close < lower` — price breaks the 10-bar low.
-- Long-only.
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
 
-**Parameters:** `entry_lookback = 20`, `exit_lookback = 10`.
+**Parameters:** `{'fast': 8, 'slow': 25, 'ma': 'sma'}`
 
-**Evidence (OOS, after costs):** positive 5/5 · avg Sharpe **0.66** · avg return 38.4% · avg MaxDD **−20.0% (best of the set)** · beats buy&hold 0/5.
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.88, 'return_avg': 0.759, 'maxdd_avg': -0.195, 'positive': '5/5', 'beats_buyhold': '0/5'}
 
-**Notes:** The OVERVIEW's pick for robustness + drawdown control. The original catalog version used an explicit take-profit/stop-loss; this is the channel form (the close-to-close engine can't model intrabar TP/SL — flagged). If the bot has intrabar fills, the TP/SL variant is worth re-testing.
+**Notes:** SMA 8/25 crossover; low-turnover trend filter, whipsaws in choppy markets.
 
-```
-upper = max(high[-21:-1])   # previous 20 bars
-lower = min(low[-11:-1])    # previous 10 bars
-if position == 0 and close > upper:  target = +1
-elif position == +1 and close < lower: target = 0
-```
+*Source video:* https://www.youtube.com/watch?v=sYRCzSbvOpQ
 
 ---
 
-### S11 — QQQ/BND Regime Allocation  *(2-asset allocation, always invested)*
-**Status:** `APPROVED_FOR_PAPER` · **multi-asset** — defined in [extras_backtest.py](extras_backtest.py), not a single-symbol position function.
+### G010 — DCA Pop  *(mean-reversion, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `bollinger`  ·  method `template`  ·  tier ROBUST
 
 **Indicators**
-- `sma30 = SMA(QQQ_close, 30)` — 30-bar SMA of the **risk asset** (QQQ).
-
-**Rules** (rebalanced daily; cost charged on weight changes)
-- **Risk-on:** when `QQQ_close > sma30` → **80% risk asset / 20% safe asset** (QQQ/BND).
-- **Risk-off:** when `QQQ_close <= sma30` → **20% risk asset / 80% safe asset**.
-
-**Evidence (OOS, after costs):** Sharpe **1.20** (highest in the set) · return 79.1% · MaxDD −19.4%. Benchmark is 100% QQQ buy&hold (173%), which it trails on raw return but with far less risk.
-
-**Crypto mapping for the bot:** "risk asset" ≈ BTC/ETH, "safe asset" ≈ a stablecoin (USDC) or cash. **Re-validate the SMA30 regime on the chosen crypto pair before use** — the 80/20 split and 30-bar lookback are equity-tuned.
-
-```
-if QQQ_close > SMA(QQQ_close, 30):  weights = {risk: 0.80, safe: 0.20}
-else:                               weights = {risk: 0.20, safe: 0.80}
-```
-
----
-
-## 3. On hold — do NOT deploy yet
-
-### S12 — KO/PEP z-score Pairs  *(market-neutral stat-arb)*
-**Status:** `HOLD — pending cointegration test`
-
-**Indicators** (lookback `L = 252` bars)
-- `beta = rolling_cov(KO, PEP, L) / rolling_var(PEP, L)`
-- `spread = KO_close − beta · PEP_close`
-- `z = (spread − rolling_mean(spread, L)) / rolling_std(spread, L)`
+- `mid` = SMA(close,20)
+- `lower` = mid - 2.0*std(close,20)
+- `upper` = mid + 2.0*std(close,20)
+- `rsi` = RSI(close,14)
 
 **Rules**
-- **Long the spread** (long KO / short PEP) when `z < −2.0`.
-- **Short the spread** (short KO / long PEP) when `z > +2.0`.
-- **Exit to flat** when `|z| < 0.5`.
+- **entry_long:** close <= lower AND rsi < 30.0
+- **exit_to_flat:** close >= upper AND rsi > 70.0
 
-**Evidence (OOS, after costs):** Sharpe **0.22** · return 5.5% · MaxDD −14.8%. It nominally "beat" its cash benchmark only because it's market-neutral — the edge is weak.
+**Parameters:** `{'n': 20, 'k': 2.0, 'rsi_n': 14, 'rsi_lower': 30.0, 'rsi_upper': 70.0, 'time_stop': 0}`
 
-**Why it's on hold:** A pairs trade is meaningless unless the spread is **cointegrated**
-(stationary). **Run an ADF / Engle–Granger test on the spread first.** If it fails,
-discard. Do not let the agent trade S12 until this passes. (Guardrail #1.)
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.81, 'return_avg': 0.674, 'maxdd_avg': -0.237, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** Bollinger-band reversion gated by RSI, with a time stop.
+
+*Source video:* https://www.youtube.com/watch?v=YQGp7Fk2X3E
 
 ---
 
-## 4. Quick reference
+### G012 — Moving Average Crossover  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
 
-| ID | Name | Type | Direction | Status | OOS Sharpe |
-|----|------|------|-----------|--------|-----------|
-| S02 | SMA 50/200 cross | trend | long/flat | APPROVED_FOR_PAPER | 0.80 |
-| S06 | LSMA(25) | mean-reversion | long/flat | APPROVED_FOR_PAPER | 0.78 |
-| S10 | Donchian breakout | breakout | long/flat | APPROVED_FOR_PAPER | 0.66 |
-| S11 | QQQ/BND allocation | allocation | always-in | APPROVED_FOR_PAPER | 1.20 |
-| S12 | KO/PEP pairs | stat-arb | market-neutral | **HOLD** | 0.22 |
+**Indicators**
+- `ma_fast` = SMA(close,5)
+- `ma_slow` = SMA(close,20)
 
-**Next steps for the bot dev:** (1) parse `agent_strategies_rules.json`; (2) wire each
-rule to live Hyperliquid candles; (3) emit `{symbol, side, target, size, strategy_id,
-reason}` proposals to the human-approval gate; (4) re-validate each strategy on the
-target crypto symbol before it is allowed past paper trading.
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 5, 'slow': 20, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.82, 'return_avg': 0.61, 'maxdd_avg': -0.21, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 5/20 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=b3VFMdjBfKA
+
+---
+
+### G013 — Breakout Strategy  *(breakout, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `donchian_breakout`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `upper` = max(high, 20) over previous 20 bars (shift 1)
+- `lower` = min(low, 10) over previous 10 bars (shift 1)
+
+**Rules**
+- **entry_long:** position == 0 and close > upper
+- **exit_to_flat:** position == 1 and close < lower
+
+**Parameters:** `{'entry_n': 20, 'exit_n': 10}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.66, 'return_avg': 0.384, 'maxdd_avg': -0.2, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** Donchian 20/10 channel breakout; typically the lowest-drawdown of the set.
+
+*Source video:* https://www.youtube.com/watch?v=Z7MA_68HmF0
+
+---
+
+### G019 — Least Squares Moving Average (LSMA) Trading Strategy  *(mean-reversion, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `lsma_meanrev`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `lsma` = LSMA(close,25): OLS endpoint a+b*(24) over last 25 closes
+
+**Rules**
+- **entry_long:** close < lsma
+- **exit_to_flat:** close >= lsma
+
+**Parameters:** `{'n': 25}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.78, 'return_avg': 0.618, 'maxdd_avg': -0.225, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** Long while price is below its least-squares regression line (counter-trend).
+
+*Source video:* https://www.youtube.com/watch?v=sESQpRoo994
+
+---
+
+### G020 — SMA Bot for HIP-3 Stock Trading  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,50)
+- `ma_slow` = SMA(close,200)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 50, 'slow': 200, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.8, 'return_avg': 0.754, 'maxdd_avg': -0.251, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=PdmdT0uMGj8
+
+---
+
+### G025 — Simple Moving Average Crossover Strategy  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,2)
+- `ma_slow` = SMA(close,100)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 2, 'slow': 100, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.79, 'return_avg': 0.644, 'maxdd_avg': -0.205, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 2/100 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=Ets0xGCjQ14
+
+---
+
+### G026 — Simple Moving Average Crossover  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,10)
+- `ma_slow` = SMA(close,20)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 10, 'slow': 20, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.69, 'return_avg': 0.597, 'maxdd_avg': -0.243, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 10/20 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=4YmRpo60kow
+
+---
+
+### G028 — Two Moving Average Crossover  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,50)
+- `ma_slow` = SMA(close,200)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 50, 'slow': 200, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.8, 'return_avg': 0.754, 'maxdd_avg': -0.251, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=29_FVmMtDWw
+
+---
+
+### G030 — Golden Cross Moving Average Strategy (EV Stocks)  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,50)
+- `ma_slow` = SMA(close,200)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 50, 'slow': 200, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.8, 'return_avg': 0.754, 'maxdd_avg': -0.251, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=6FQz7MDTogs
+
+---
+
+### G032 — Moving Average Crossover EA  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,50)
+- `ma_slow` = SMA(close,200)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 50, 'slow': 200, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.8, 'return_avg': 0.754, 'maxdd_avg': -0.251, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 50/200 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=xK_yac8QF-I
+
+---
+
+### G035 — SMA Crossover Strategy  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,2)
+- `ma_slow` = SMA(close,20)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 2, 'slow': 20, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.81, 'return_avg': 0.641, 'maxdd_avg': -0.201, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 2/20 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=j6K-pyF1hdI
+
+---
+
+### G036 — Bitcoin SMA Crossover Strategy  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = SMA(close,20)
+- `ma_slow` = SMA(close,40)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 20, 'slow': 40, 'ma': 'sma'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.73, 'return_avg': 0.601, 'maxdd_avg': -0.232, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** SMA 20/40 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=QLYmpGlZpG0
+
+---
+
+### G037 — Multi-Timeframe Trend-Following with Price Action  *(breakout, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `donchian_breakout`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `upper` = max(high, 20) over previous 20 bars (shift 1)
+- `lower` = min(low, 10) over previous 10 bars (shift 1)
+
+**Rules**
+- **entry_long:** position == 0 and close > upper
+- **exit_to_flat:** position == 1 and close < lower
+
+**Parameters:** `{'entry_n': 20, 'exit_n': 10}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.66, 'return_avg': 0.384, 'maxdd_avg': -0.2, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** Donchian 20/10 channel breakout; typically the lowest-drawdown of the set.
+
+*Source video:* https://www.youtube.com/watch?v=4r55Vo-mOM8
+
+---
+
+### G039 — AI Swing Trade Analyzer  *(breakout, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `donchian_breakout`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `upper` = max(high, 20) over previous 20 bars (shift 1)
+- `lower` = min(low, 10) over previous 10 bars (shift 1)
+
+**Rules**
+- **entry_long:** position == 0 and close > upper
+- **exit_to_flat:** position == 1 and close < lower
+
+**Parameters:** `{'entry_n': 20, 'exit_n': 10}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.66, 'return_avg': 0.384, 'maxdd_avg': -0.2, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** Donchian 20/10 channel breakout; typically the lowest-drawdown of the set.
+
+*Source video:* https://www.youtube.com/watch?v=86ZpQn85nCc
+
+---
+
+### G040 — Multi-Asset Trend Following with Price Action  *(trend-following, long_flat)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `ma_crossover`  ·  method `template`  ·  tier ROBUST
+
+**Indicators**
+- `ma_fast` = EMA(close,20)
+- `ma_slow` = EMA(close,50)
+
+**Rules**
+- **entry_long:** ma_fast > ma_slow
+- **exit_to_flat:** ma_fast <= ma_slow
+
+**Parameters:** `{'fast': 20, 'slow': 50, 'ma': 'ema'}`
+
+**Evidence (OOS, after costs):** {'sharpe_avg': 0.7, 'return_avg': 0.566, 'maxdd_avg': -0.225, 'positive': '5/5', 'beats_buyhold': '0/5'}
+
+**Notes:** EMA 20/50 crossover; low-turnover trend filter, whipsaws in choppy markets.
+
+*Source video:* https://www.youtube.com/watch?v=MnG2Ru_LVEw
+
+---
+
+### G005 — Dynamic Allocation Strategy (QQQ/BND)  *(allocation, always_invested)*
+**Status:** `APPROVED_FOR_PAPER`  ·  family `allocation`  ·  method `template`  ·  tier ROBUST
+**Assets:** {'risk': 'QQQ', 'safe': 'BND'}  (code: generated_strats.py (MULTI))
+
+**Indicators**
+- `sma` = SMA(risk_close,30)
+
+**Rules**
+- **risk_on:** risk_close > sma -> 80% risk / 19% safe
+- **risk_off:** risk_close <= sma -> 20% risk / 80% safe
+
+**Parameters:** `{'sma_n': 30, 'on_risk_w': 0.8, 'off_risk_w': 0.2}`
+
+**Evidence (OOS, after costs):** {'sharpe': 1.19, 'return': 0.788, 'maxdd': -0.194}
+
+**Notes:** Two-asset regime allocation. Re-validate the SMA regime and weights on the chosen crypto pair.
+
+*Source video:* https://www.youtube.com/watch?v=-F3ITjfelrM
+
+---
+
+## Quick reference
+
+| ID | Name | Type | Direction | Status |
+|----|------|------|-----------|--------|
+| G001 | Price Channel Breakout Strategy | breakout | long_flat | APPROVED_FOR_PAPER |
+| G003 | Long-only Momentum Strategy with 200-day SMA Exit | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G004 | 8 SMA and 25 SMA Crossover Strategy | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G010 | DCA Pop | mean-reversion | long_flat | APPROVED_FOR_PAPER |
+| G012 | Moving Average Crossover | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G013 | Breakout Strategy | breakout | long_flat | APPROVED_FOR_PAPER |
+| G019 | Least Squares Moving Average (LSMA) Trading Strategy | mean-reversion | long_flat | APPROVED_FOR_PAPER |
+| G020 | SMA Bot for HIP-3 Stock Trading | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G025 | Simple Moving Average Crossover Strategy | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G026 | Simple Moving Average Crossover | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G028 | Two Moving Average Crossover | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G030 | Golden Cross Moving Average Strategy (EV Stocks) | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G032 | Moving Average Crossover EA | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G035 | SMA Crossover Strategy | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G036 | Bitcoin SMA Crossover Strategy | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G037 | Multi-Timeframe Trend-Following with Price Action | breakout | long_flat | APPROVED_FOR_PAPER |
+| G039 | AI Swing Trade Analyzer | breakout | long_flat | APPROVED_FOR_PAPER |
+| G040 | Multi-Asset Trend Following with Price Action | trend-following | long_flat | APPROVED_FOR_PAPER |
+| G005 | Dynamic Allocation Strategy (QQQ/BND) | allocation | always_invested | APPROVED_FOR_PAPER |
